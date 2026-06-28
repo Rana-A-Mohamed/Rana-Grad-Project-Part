@@ -1,0 +1,1483 @@
+openapi: 3.0.3
+info:
+  title: Bayt Al Taleb API
+  version: 1.0.0
+  description: >
+    REST API for the Bayt Al Taleb academic content platform.
+
+    All responses use a uniform envelope:
+      success → { "success": true, "data": ... }
+      error   → { "success": false, "error": { "code", "message", "details?" } }
+
+    Authentication is JWT Bearer. Obtain tokens via POST /auth/login or /auth/register,
+    then send `Authorization: Bearer <accessToken>`. Most write endpoints require a
+    permission (e.g. files:upload); some admin endpoints require a role directly.
+    SUPER_ADMIN holds every permission. MODERATOR write actions are additionally
+    scoped to the majors/scholarships assigned to them.
+servers:
+  - url: http://localhost:4000/api/v1
+    description: Local development
+tags:
+  - name: Auth
+  - name: Users
+  - name: Roles
+  - name: Colleges
+  - name: Majors
+  - name: Scholarships
+  - name: Content
+  - name: Files
+  - name: Reviews
+  - name: Search
+  - name: Contact
+  - name: Notifications
+  - name: Audit Logs
+  - name: Deleted Items
+  - name: Dashboard
+
+security:
+  - bearerAuth: []
+
+paths:
+  # ───────────────────────────── Auth ─────────────────────────────
+  /auth/register:
+    post:
+      tags: [Auth]
+      summary: Register a new member account
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password, fullName]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string, minLength: 8, maxLength: 128 }
+                fullName: { type: string, minLength: 2, maxLength: 120 }
+            example: { email: "sara@example.com", password: "password123", fullName: "Sara A." }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthEnvelope' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/Validation' }
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Log in
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string, minLength: 1 }
+            example: { email: "sara@example.com", password: "password123" }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthEnvelope' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/Validation' }
+  /auth/refresh:
+    post:
+      tags: [Auth]
+      summary: Rotate tokens using a refresh token
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refreshToken]
+              properties:
+                refreshToken: { type: string, minLength: 10 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthEnvelope' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/Validation' }
+  /auth/logout:
+    post:
+      tags: [Auth]
+      summary: Revoke a refresh token
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refreshToken]
+              properties:
+                refreshToken: { type: string, minLength: 10 }
+      responses:
+        '204': { description: No Content }
+        '422': { $ref: '#/components/responses/Validation' }
+
+  # ───────────────────────────── Users ────────────────────────────
+  /users:
+    get:
+      tags: [Users]
+      summary: List users
+      description: 'Permission: users:read'
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - properties:
+                      data: { $ref: '#/components/schemas/UserPage' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Users]
+      summary: Create a user
+      description: 'Permission: users:manage'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password, fullName, role]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string, minLength: 8, maxLength: 128 }
+                fullName: { type: string, minLength: 2, maxLength: 120 }
+                role: { $ref: '#/components/schemas/RoleName' }
+      responses:
+        '201': { $ref: '#/components/responses/UserOk' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/Validation' }
+  /users/{id}:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    get:
+      tags: [Users]
+      summary: Get a user by id
+      description: 'Permission: users:read'
+      responses:
+        '200': { $ref: '#/components/responses/UserOk' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [Users]
+      summary: Update a user
+      description: 'Permission: users:manage'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              minProperties: 1
+              properties:
+                fullName: { type: string, minLength: 2, maxLength: 120 }
+                isActive: { type: boolean }
+      responses:
+        '200': { $ref: '#/components/responses/UserOk' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/Validation' }
+
+  # ───────────────────────────── Roles ────────────────────────────
+  /roles:
+    get:
+      tags: [Roles]
+      summary: List roles with permission keys
+      description: 'Permission: roles:read'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/Role' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /roles/{userId}/assign:
+    put:
+      tags: [Roles]
+      summary: Assign a role to a user
+      description: 'Permission: roles:assign'
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role]
+              properties:
+                role: { $ref: '#/components/schemas/RoleName' }
+      responses:
+        '204': { description: No Content }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/Validation' }
+
+  # ─────────────────────────── Colleges ───────────────────────────
+  /colleges:
+    get:
+      tags: [Colleges]
+      summary: List colleges (public)
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - properties: { data: { $ref: '#/components/schemas/CollegePage' } }
+    post:
+      tags: [Colleges]
+      summary: Create a college
+      description: 'Permission: majors:manage'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CollegeCreate' }
+      responses:
+        '201': { $ref: '#/components/responses/CollegeOk' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/Validation' }
+  /colleges/{id}:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    get:
+      tags: [Colleges]
+      summary: Get a college (public)
+      security: []
+      responses:
+        '200': { $ref: '#/components/responses/CollegeOk' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [Colleges]
+      summary: Update a college
+      description: 'Permission: majors:manage'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              minProperties: 1
+              properties:
+                slug: { $ref: '#/components/schemas/Slug' }
+                name: { type: string, minLength: 2, maxLength: 200 }
+                description: { type: string, maxLength: 2000 }
+                isActive: { type: boolean }
+      responses:
+        '200': { $ref: '#/components/responses/CollegeOk' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/Validation' }
+    delete:
+      tags: [Colleges]
+      summary: Delete a college (only if it has no majors)
+      description: 'Permission: majors:manage'
+      responses:
+        '204': { description: No Content }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /colleges/{id}/majors:
+    get:
+      tags: [Colleges]
+      summary: List a college's majors (public)
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - properties: { data: { $ref: '#/components/schemas/MajorPage' } }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ──────────────────────────── Majors ────────────────────────────
+  /majors:
+    get:
+      tags: [Majors]
+      summary: List majors (public)
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - properties: { data: { $ref: '#/components/schemas/MajorPage' } }
+    post:
+      tags: [Majors]
+      summary: Create a major
+      description: 'Permission: majors:manage'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [slug, name]
+              properties:
+                slug: { $ref: '#/components/schemas/Slug' }
+                name: { type: string, minLength: 2, maxLength: 200 }
+                isActive: { type: boolean }
+                collegeId: { type: string, nullable: true }
+      responses:
+        '201': { $ref: '#/components/responses/MajorOk' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/Validation' }
+  /majors/{id}:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    get:
+      tags: [Majors]
+      summary: Get a major (public)
+      security: []
+      responses:
+        '200': { $ref: '#/components/responses/MajorOk' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [Majors]
+      summary: Update a major
+      description: 'Permission: majors:manage'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              minProperties: 1
+              properties:
+                slug: { $ref: '#/components/schemas/Slug' }
+                name: { type: string, minLength: 2, maxLength: 200 }
+                isActive: { type: boolean }
+                collegeId: { type: string, nullable: true }
+      responses:
+        '200': { $ref: '#/components/responses/MajorOk' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/Validation' }
+    delete:
+      tags: [Majors]
+      summary: Soft delete a major
+      description: 'Permission: majors:manage. Hidden from public APIs, enters Deleted Items queue.'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DeleteReason' }
+      responses:
+        '204': { description: No Content }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ───────────────────────── Scholarships ─────────────────────────
+  /scholarships:
+    get:
+      tags: [Scholarships]
+      summary: List scholarships (public)
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - properties: { data: { $ref: '#/components/schemas/ScholarshipPage' } }
+    post:
+      tags: [Scholarships]
+      summary: Create a scholarship
+      description: 'Permission: scholarships:manage'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [slug, name]
+              properties:
+                slug: { $ref: '#/components/schemas/Slug' }
+                name: { type: string, minLength: 2, maxLength: 200 }
+                isActive: { type: boolean }
+      responses:
+        '201': { $ref: '#/components/responses/ScholarshipOk' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/Validation' }
+  /scholarships/{id}:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    get:
+      tags: [Scholarships]
+      summary: Get a scholarship (public)
+      security: []
+      responses:
+        '200': { $ref: '#/components/responses/ScholarshipOk' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [Scholarships]
+      summary: Update a scholarship
+      description: 'Permission: scholarships:manage'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              minProperties: 1
+              properties:
+                slug: { $ref: '#/components/schemas/Slug' }
+                name: { type: string, minLength: 2, maxLength: 200 }
+                isActive: { type: boolean }
+      responses:
+        '200': { $ref: '#/components/responses/ScholarshipOk' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/Validation' }
+    delete:
+      tags: [Scholarships]
+      summary: Soft delete a scholarship
+      description: 'Permission: scholarships:manage'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DeleteReason' }
+      responses:
+        '204': { description: No Content }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ──────────────────────────── Content ───────────────────────────
+  /content/{entityType}/{entityId}/sections:
+    parameters:
+      - $ref: '#/components/parameters/EntityType'
+      - $ref: '#/components/parameters/EntityId'
+    get:
+      tags: [Content]
+      summary: List sections for an owner (public)
+      security: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/Section' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      tags: [Content]
+      summary: Add a section
+      description: 'Permission: content:manage'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title, content]
+              properties:
+                title: { type: string, minLength: 1, maxLength: 200 }
+                content: { type: string, minLength: 1 }
+                sortOrder: { type: integer, minimum: 0 }
+      responses:
+        '201': { $ref: '#/components/responses/SectionOk' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/Validation' }
+  /content/{entityType}/{entityId}/sections/{id}:
+    parameters:
+      - $ref: '#/components/parameters/EntityType'
+      - $ref: '#/components/parameters/EntityId'
+      - $ref: '#/components/parameters/IdPath'
+    patch:
+      tags: [Content]
+      summary: Update a section
+      description: 'Permission: content:manage'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              minProperties: 1
+              properties:
+                title: { type: string, minLength: 1, maxLength: 200 }
+                content: { type: string, minLength: 1 }
+                sortOrder: { type: integer, minimum: 0 }
+      responses:
+        '200': { $ref: '#/components/responses/SectionOk' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/Validation' }
+    delete:
+      tags: [Content]
+      summary: Soft delete a section
+      description: 'Permission: content:manage'
+      responses:
+        '204': { description: No Content }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /content/{entityType}/{entityId}/faqs:
+    parameters:
+      - $ref: '#/components/parameters/EntityType'
+      - $ref: '#/components/parameters/EntityId'
+    get:
+      tags: [Content]
+      summary: List FAQs for an owner (public)
+      security: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/Faq' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      tags: [Content]
+      summary: Add an FAQ
+      description: 'Permission: content:manage'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [question, answer]
+              properties:
+                question: { type: string, minLength: 1, maxLength: 300 }
+                answer: { type: string, minLength: 1 }
+                sortOrder: { type: integer, minimum: 0 }
+      responses:
+        '201': { $ref: '#/components/responses/FaqOk' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/Validation' }
+  /content/{entityType}/{entityId}/faqs/{id}:
+    parameters:
+      - $ref: '#/components/parameters/EntityType'
+      - $ref: '#/components/parameters/EntityId'
+      - $ref: '#/components/parameters/IdPath'
+    patch:
+      tags: [Content]
+      summary: Update an FAQ
+      description: 'Permission: content:manage'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              minProperties: 1
+              properties:
+                question: { type: string, minLength: 1, maxLength: 300 }
+                answer: { type: string, minLength: 1 }
+                sortOrder: { type: integer, minimum: 0 }
+      responses:
+        '200': { $ref: '#/components/responses/FaqOk' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/Validation' }
+    delete:
+      tags: [Content]
+      summary: Soft delete an FAQ
+      description: 'Permission: content:manage'
+      responses:
+        '204': { description: No Content }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ───────────────────────────── Files ────────────────────────────
+  /files:
+    get:
+      tags: [Files]
+      summary: List files
+      description: 'Permission: files:read'
+      parameters:
+        - { name: status, in: query, schema: { $ref: '#/components/schemas/FileStatus' } }
+        - { name: type, in: query, schema: { $ref: '#/components/schemas/FileType' } }
+        - { name: mine, in: query, schema: { type: boolean }, description: Only the caller's uploads }
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - properties: { data: { $ref: '#/components/schemas/FilePage' } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Files]
+      summary: Upload a file (multipart)
+      description: >
+        Permission: files:upload. Creates a PENDING file. Allowed types: PDF, DOC,
+        DOCX, PPT, PPTX, ZIP. Max size configurable (default 25MB). Server validates
+        extension + MIME + size; rejects double extensions / executables.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file, title, type, ownerType, ownerId]
+              properties:
+                file: { type: string, format: binary }
+                title: { type: string, minLength: 1, maxLength: 200 }
+                description: { type: string, maxLength: 2000 }
+                type: { $ref: '#/components/schemas/FileType' }
+                ownerType: { $ref: '#/components/schemas/OwnerType' }
+                ownerId: { type: string }
+      responses:
+        '201': { $ref: '#/components/responses/FileOk' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/Validation' }
+  /files/owner/{ownerType}/{ownerId}:
+    get:
+      tags: [Files]
+      summary: List all files for an owner
+      description: 'Permission: files:read'
+      parameters:
+        - $ref: '#/components/parameters/OwnerTypePath'
+        - $ref: '#/components/parameters/OwnerIdPath'
+      responses:
+        '200': { $ref: '#/components/responses/FileArrayOk' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /files/owner/{ownerType}/{ownerId}/approved:
+    get:
+      tags: [Files]
+      summary: List APPROVED files for an owner (public-facing set)
+      description: 'Permission: files:read'
+      parameters:
+        - $ref: '#/components/parameters/OwnerTypePath'
+        - $ref: '#/components/parameters/OwnerIdPath'
+      responses:
+        '200': { $ref: '#/components/responses/FileArrayOk' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /files/{id}:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    get:
+      tags: [Files]
+      summary: Get a file
+      description: 'Permission: files:read'
+      responses:
+        '200': { $ref: '#/components/responses/FileOk' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [Files]
+      summary: Soft delete a file (purges binary from storage)
+      description: 'Permission: files:manage'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DeleteReason' }
+      responses:
+        '204': { description: No Content }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /files/{id}/download:
+    get:
+      tags: [Files]
+      summary: Download a file's bytes
+      description: >
+        Optional auth. APPROVED files are public; PENDING/REJECTED require the
+        uploader or a moderator/admin assigned to the owner.
+      security:
+        - {}
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '200':
+          description: Binary stream (Content-Disposition attachment)
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ──────────────────────────── Reviews ───────────────────────────
+  /files/{fileId}/reviews:
+    parameters:
+      - { name: fileId, in: path, required: true, schema: { type: string } }
+    post:
+      tags: [Reviews]
+      summary: Approve or reject a PENDING file
+      description: 'Permission: files:review. Auto-notifies the uploader.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action]
+              properties:
+                action: { $ref: '#/components/schemas/ReviewAction' }
+                comment: { type: string, maxLength: 2000 }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - properties: { data: { $ref: '#/components/schemas/Review' } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/Validation' }
+    get:
+      tags: [Reviews]
+      summary: Review history for a file
+      description: 'Permission: files:read'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/Review' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ───────────────────────────── Search ───────────────────────────
+  /search:
+    get:
+      tags: [Search]
+      summary: Global full-text search (public)
+      security: []
+      parameters:
+        - { name: q, in: query, required: true, schema: { type: string, minLength: 1, maxLength: 200 } }
+        - { name: type, in: query, schema: { $ref: '#/components/schemas/SearchableType' }, description: Single-type filter }
+        - { name: types, in: query, schema: { type: string }, description: 'Comma-separated, e.g. major,scholarship' }
+        - $ref: '#/components/parameters/Page'
+        - { name: pageSize, in: query, schema: { type: integer, default: 20, maximum: 50 } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - properties: { data: { $ref: '#/components/schemas/SearchResults' } }
+        '422': { $ref: '#/components/responses/Validation' }
+
+  # ──────────────────────────── Contact ───────────────────────────
+  /contact:
+    post:
+      tags: [Contact]
+      summary: Submit a contact message (public)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, email, subject, message]
+              properties:
+                name: { type: string, minLength: 2, maxLength: 120 }
+                email: { type: string, format: email }
+                subject: { type: string, minLength: 2, maxLength: 200 }
+                message: { type: string, minLength: 5, maxLength: 5000 }
+      responses:
+        '201': { $ref: '#/components/responses/ContactOk' }
+        '422': { $ref: '#/components/responses/Validation' }
+    get:
+      tags: [Contact]
+      summary: List contact messages (admin inbox)
+      description: 'Permission: contact:manage'
+      parameters:
+        - { name: handled, in: query, schema: { type: boolean } }
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - properties: { data: { $ref: '#/components/schemas/ContactPage' } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /contact/{id}/handle:
+    patch:
+      tags: [Contact]
+      summary: Mark a contact message handled
+      description: 'Permission: contact:manage'
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '200': { $ref: '#/components/responses/ContactOk' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ───────────────────────── Notifications ────────────────────────
+  /notifications:
+    get:
+      tags: [Notifications]
+      summary: List the caller's notifications
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - properties: { data: { $ref: '#/components/schemas/NotificationPage' } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: [Notifications]
+      summary: Create an announcement (optionally broadcast to a role)
+      description: 'Role: ADMIN or SUPER_ADMIN'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title, message]
+              properties:
+                title: { type: string, minLength: 1, maxLength: 200 }
+                message: { type: string, minLength: 1, maxLength: 5000 }
+                targetRole: { $ref: '#/components/schemas/RoleName' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          broadcast: { type: boolean }
+                          targetRole: { $ref: '#/components/schemas/RoleName' }
+                          sent: { type: integer }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/Validation' }
+  /notifications/unread-count:
+    get:
+      tags: [Notifications]
+      summary: Unread notification count
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - properties:
+                      data:
+                        type: object
+                        properties: { unreadCount: { type: integer } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /notifications/read-all:
+    patch:
+      tags: [Notifications]
+      summary: Mark all notifications read
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - properties:
+                      data:
+                        type: object
+                        properties: { updated: { type: integer } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /notifications/{id}/read:
+    patch:
+      tags: [Notifications]
+      summary: Mark a single notification read
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '204': { description: No Content }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ─────────────────────────── Audit Logs ─────────────────────────
+  /audit-logs:
+    get:
+      tags: [Audit Logs]
+      summary: Filterable audit trail
+      description: 'Role: ADMIN or SUPER_ADMIN'
+      parameters:
+        - { name: entityType, in: query, schema: { $ref: '#/components/schemas/AuditEntityType' } }
+        - { name: entityId, in: query, schema: { type: string } }
+        - { name: action, in: query, schema: { $ref: '#/components/schemas/AuditAction' } }
+        - { name: userId, in: query, schema: { type: string } }
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - properties: { data: { $ref: '#/components/schemas/AuditPage' } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  # ────────────────────────── Deleted Items ───────────────────────
+  /deleted-items:
+    get:
+      tags: [Deleted Items]
+      summary: Deleted-items queue
+      description: 'Role: SUPER_ADMIN'
+      parameters:
+        - { name: entityType, in: query, schema: { $ref: '#/components/schemas/AuditEntityType' } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/DeletedItem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /deleted-items/{entityType}/{id}/restore:
+    post:
+      tags: [Deleted Items]
+      summary: Restore a soft-deleted item
+      description: 'Role: SUPER_ADMIN'
+      parameters:
+        - $ref: '#/components/parameters/AuditEntityTypePath'
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '204': { description: No Content }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /deleted-items/{entityType}/{id}:
+    delete:
+      tags: [Deleted Items]
+      summary: Permanently delete an item (irreversible)
+      description: 'Role: SUPER_ADMIN'
+      parameters:
+        - $ref: '#/components/parameters/AuditEntityTypePath'
+        - $ref: '#/components/parameters/IdPath'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DeleteReason' }
+      responses:
+        '204': { description: No Content }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ─────────────────────────── Dashboard ──────────────────────────
+  /dashboard/stats:
+    get:
+      tags: [Dashboard]
+      summary: Platform-wide statistics
+      description: 'Role: ADMIN or SUPER_ADMIN'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - properties: { data: { $ref: '#/components/schemas/DashboardStats' } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /dashboard/recent-activity:
+    get:
+      tags: [Dashboard]
+      summary: Latest 10 records per category
+      description: 'Role: ADMIN or SUPER_ADMIN'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - properties: { data: { $ref: '#/components/schemas/RecentActivity' } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    Page: { name: page, in: query, schema: { type: integer, default: 1, minimum: 1 } }
+    PageSize: { name: pageSize, in: query, schema: { type: integer, default: 20, maximum: 100 } }
+    IdPath: { name: id, in: path, required: true, schema: { type: string } }
+    EntityType: { name: entityType, in: path, required: true, schema: { $ref: '#/components/schemas/OwnerType' } }
+    EntityId: { name: entityId, in: path, required: true, schema: { type: string } }
+    OwnerTypePath: { name: ownerType, in: path, required: true, schema: { $ref: '#/components/schemas/OwnerType' } }
+    OwnerIdPath: { name: ownerId, in: path, required: true, schema: { type: string } }
+    AuditEntityTypePath: { name: entityType, in: path, required: true, schema: { $ref: '#/components/schemas/AuditEntityType' } }
+
+  responses:
+    BadRequest:
+      description: Bad request
+      content: { application/json: { schema: { $ref: '#/components/schemas/ErrorEnvelope' } } }
+    Unauthorized:
+      description: Missing or invalid token
+      content: { application/json: { schema: { $ref: '#/components/schemas/ErrorEnvelope' } } }
+    Forbidden:
+      description: Insufficient permission/role/ownership
+      content: { application/json: { schema: { $ref: '#/components/schemas/ErrorEnvelope' } } }
+    NotFound:
+      description: Resource not found
+      content: { application/json: { schema: { $ref: '#/components/schemas/ErrorEnvelope' } } }
+    Conflict:
+      description: Conflict (unique constraint / invalid state)
+      content: { application/json: { schema: { $ref: '#/components/schemas/ErrorEnvelope' } } }
+    Validation:
+      description: Request failed schema validation
+      content: { application/json: { schema: { $ref: '#/components/schemas/ErrorEnvelope' } } }
+    UserOk:
+      description: OK
+      content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/SuccessEnvelope' }, { properties: { data: { $ref: '#/components/schemas/User' } } } ] } } }
+    CollegeOk:
+      description: OK
+      content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/SuccessEnvelope' }, { properties: { data: { $ref: '#/components/schemas/College' } } } ] } } }
+    MajorOk:
+      description: OK
+      content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/SuccessEnvelope' }, { properties: { data: { $ref: '#/components/schemas/Major' } } } ] } } }
+    ScholarshipOk:
+      description: OK
+      content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/SuccessEnvelope' }, { properties: { data: { $ref: '#/components/schemas/Scholarship' } } } ] } } }
+    SectionOk:
+      description: OK
+      content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/SuccessEnvelope' }, { properties: { data: { $ref: '#/components/schemas/Section' } } } ] } } }
+    FaqOk:
+      description: OK
+      content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/SuccessEnvelope' }, { properties: { data: { $ref: '#/components/schemas/Faq' } } } ] } } }
+    FileOk:
+      description: OK
+      content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/SuccessEnvelope' }, { properties: { data: { $ref: '#/components/schemas/File' } } } ] } } }
+    FileArrayOk:
+      description: OK
+      content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/SuccessEnvelope' }, { properties: { data: { type: array, items: { $ref: '#/components/schemas/File' } } } } ] } } }
+    ContactOk:
+      description: OK
+      content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/SuccessEnvelope' }, { properties: { data: { $ref: '#/components/schemas/ContactMessage' } } } ] } } }
+
+  schemas:
+    RoleName: { type: string, enum: [SUPER_ADMIN, ADMIN, MODERATOR, MEMBER, VISITOR] }
+    OwnerType: { type: string, enum: [MAJOR, SCHOLARSHIP] }
+    SearchableType: { type: string, enum: [major, scholarship, file] }
+    FileType: { type: string, enum: [SUMMARY, PREVIOUS_EXAM, SYLLABUS, OTHER] }
+    FileStatus: { type: string, enum: [PENDING, APPROVED, REJECTED] }
+    ReviewAction: { type: string, enum: [APPROVE, REJECT] }
+    AuditAction: { type: string, enum: [CREATE, UPDATE, DELETE, RESTORE, APPROVE, REJECT] }
+    AuditEntityType: { type: string, enum: [MAJOR, SCHOLARSHIP, FILE, SECTION, FAQ] }
+    Slug: { type: string, minLength: 2, maxLength: 120, pattern: '^[a-z0-9]+(?:-[a-z0-9]+)*$' }
+
+    SuccessEnvelope:
+      type: object
+      properties:
+        success: { type: boolean, example: true }
+        data: {}
+    ErrorEnvelope:
+      type: object
+      properties:
+        success: { type: boolean, example: false }
+        error:
+          type: object
+          properties:
+            code: { type: string, example: VALIDATION_ERROR }
+            message: { type: string }
+            details: {}
+    DeleteReason:
+      type: object
+      properties:
+        reason: { type: string, maxLength: 2000 }
+
+    Pagination:
+      type: object
+      properties:
+        total: { type: integer }
+        page: { type: integer }
+        pageSize: { type: integer }
+        totalPages: { type: integer }
+
+    AuthEnvelope:
+      type: object
+      properties:
+        success: { type: boolean, example: true }
+        data:
+          type: object
+          properties:
+            user: { $ref: '#/components/schemas/AuthUser' }
+            tokens:
+              type: object
+              properties:
+                accessToken: { type: string }
+                refreshToken: { type: string }
+    AuthUser:
+      type: object
+      properties:
+        id: { type: string }
+        email: { type: string }
+        fullName: { type: string }
+        role: { $ref: '#/components/schemas/RoleName' }
+
+    User:
+      type: object
+      properties:
+        id: { type: string }
+        email: { type: string }
+        fullName: { type: string }
+        role: { $ref: '#/components/schemas/RoleName' }
+        isActive: { type: boolean }
+        createdAt: { type: string, format: date-time }
+    UserPage:
+      allOf:
+        - $ref: '#/components/schemas/Pagination'
+        - properties: { items: { type: array, items: { $ref: '#/components/schemas/User' } } }
+
+    Role:
+      type: object
+      properties:
+        id: { type: string }
+        name: { $ref: '#/components/schemas/RoleName' }
+        description: { type: string, nullable: true }
+        permissions: { type: array, items: { type: string } }
+
+    College:
+      type: object
+      properties:
+        id: { type: string }
+        slug: { type: string }
+        name: { type: string }
+        description: { type: string, nullable: true }
+        isActive: { type: boolean }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    CollegeCreate:
+      type: object
+      required: [slug, name]
+      properties:
+        slug: { $ref: '#/components/schemas/Slug' }
+        name: { type: string, minLength: 2, maxLength: 200 }
+        description: { type: string, maxLength: 2000 }
+        isActive: { type: boolean }
+    CollegePage:
+      allOf:
+        - $ref: '#/components/schemas/Pagination'
+        - properties: { items: { type: array, items: { $ref: '#/components/schemas/College' } } }
+
+    Major:
+      type: object
+      properties:
+        id: { type: string }
+        slug: { type: string }
+        name: { type: string }
+        isActive: { type: boolean }
+        collegeId: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+    MajorPage:
+      allOf:
+        - $ref: '#/components/schemas/Pagination'
+        - properties: { items: { type: array, items: { $ref: '#/components/schemas/Major' } } }
+
+    Scholarship:
+      type: object
+      properties:
+        id: { type: string }
+        slug: { type: string }
+        name: { type: string }
+        isActive: { type: boolean }
+        createdAt: { type: string, format: date-time }
+    ScholarshipPage:
+      allOf:
+        - $ref: '#/components/schemas/Pagination'
+        - properties: { items: { type: array, items: { $ref: '#/components/schemas/Scholarship' } } }
+
+    Section:
+      type: object
+      properties:
+        id: { type: string }
+        entityType: { $ref: '#/components/schemas/OwnerType' }
+        entityId: { type: string }
+        title: { type: string }
+        content: { type: string }
+        sortOrder: { type: integer }
+        createdAt: { type: string, format: date-time }
+    Faq:
+      type: object
+      properties:
+        id: { type: string }
+        entityType: { $ref: '#/components/schemas/OwnerType' }
+        entityId: { type: string }
+        question: { type: string }
+        answer: { type: string }
+        sortOrder: { type: integer }
+        createdAt: { type: string, format: date-time }
+
+    File:
+      type: object
+      properties:
+        id: { type: string }
+        title: { type: string }
+        description: { type: string, nullable: true }
+        type: { $ref: '#/components/schemas/FileType' }
+        status: { $ref: '#/components/schemas/FileStatus' }
+        storageKey: { type: string }
+        mimeType: { type: string, nullable: true }
+        sizeBytes: { type: integer, nullable: true }
+        ownerType: { $ref: '#/components/schemas/OwnerType' }
+        ownerId: { type: string }
+        uploadedById: { type: string }
+        createdAt: { type: string, format: date-time }
+    FilePage:
+      allOf:
+        - $ref: '#/components/schemas/Pagination'
+        - properties: { items: { type: array, items: { $ref: '#/components/schemas/File' } } }
+
+    Review:
+      type: object
+      properties:
+        id: { type: string }
+        fileId: { type: string }
+        reviewerId: { type: string }
+        action: { $ref: '#/components/schemas/ReviewAction' }
+        comment: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+
+    SearchResults:
+      type: object
+      properties:
+        query: { type: string }
+        total: { type: integer }
+        page: { type: integer }
+        pageSize: { type: integer }
+        hits:
+          type: array
+          items:
+            type: object
+            properties:
+              type: { $ref: '#/components/schemas/SearchableType' }
+              id: { type: string }
+              title: { type: string }
+              slug: { type: string }
+              score: { type: number }
+
+    ContactMessage:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        email: { type: string }
+        subject: { type: string }
+        message: { type: string }
+        isHandled: { type: boolean }
+        createdAt: { type: string, format: date-time }
+    ContactPage:
+      allOf:
+        - $ref: '#/components/schemas/Pagination'
+        - properties: { items: { type: array, items: { $ref: '#/components/schemas/ContactMessage' } } }
+
+    Notification:
+      type: object
+      properties:
+        id: { type: string }
+        userId: { type: string }
+        title: { type: string }
+        message: { type: string }
+        isRead: { type: boolean }
+        metadata: {}
+        createdAt: { type: string, format: date-time }
+    NotificationPage:
+      allOf:
+        - $ref: '#/components/schemas/Pagination'
+        - properties: { items: { type: array, items: { $ref: '#/components/schemas/Notification' } } }
+
+    AuditLog:
+      type: object
+      properties:
+        id: { type: string }
+        userId: { type: string }
+        action: { $ref: '#/components/schemas/AuditAction' }
+        entityType: { $ref: '#/components/schemas/AuditEntityType' }
+        entityId: { type: string }
+        reason: { type: string, nullable: true }
+        metadata: {}
+        createdAt: { type: string, format: date-time }
+    AuditPage:
+      allOf:
+        - $ref: '#/components/schemas/Pagination'
+        - properties: { items: { type: array, items: { $ref: '#/components/schemas/AuditLog' } } }
+
+    DeletedItem:
+      type: object
+      properties:
+        entityType: { $ref: '#/components/schemas/AuditEntityType' }
+        id: { type: string }
+        label: { type: string }
+        deletedAt: { type: string, format: date-time }
+        deletedById: { type: string, nullable: true }
+        deleteReason: { type: string, nullable: true }
+
+    DashboardStats:
+      type: object
+      properties:
+        totalUsers: { type: integer }
+        totalMajors: { type: integer }
+        totalColleges: { type: integer }
+        totalScholarships: { type: integer }
+        totalFiles: { type: integer }
+        pendingFiles: { type: integer }
+        approvedFiles: { type: integer }
+        rejectedFiles: { type: integer }
+        deletedItems: { type: integer }
+        totalContactMessages: { type: integer }
+        unhandledContactMessages: { type: integer }
+    RecentActivity:
+      type: object
+      properties:
+        recentUploads: { type: array, items: { $ref: '#/components/schemas/File' } }
+        recentAuditLogs: { type: array, items: { $ref: '#/components/schemas/AuditLog' } }
+        recentDeletedItems: { type: array, items: { $ref: '#/components/schemas/DeletedItem' } }
+        recentContactMessages: { type: array, items: { $ref: '#/components/schemas/ContactMessage' } }

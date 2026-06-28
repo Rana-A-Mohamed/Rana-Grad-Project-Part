@@ -1,0 +1,34 @@
+# ── Monorepo root .gitignore (applies to backend/ and frontend/) ──
+
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+
+# Test / coverage
+coverage/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Environment files (any package)
+.env
+.env.local
+.env.*.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Prisma local SQLite (if any)
+**/prisma/*.db
+
+# Uploaded files (backend local storage backend)
+**/uploads/
+
+# Editor
+.vscode/
+.idea/
